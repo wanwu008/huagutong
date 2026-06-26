@@ -3,9 +3,9 @@
 /**
  * gh-proxy - GitHub release/archive/file acceleration proxy
  * Adapted for Vercel Serverless Functions
+ * Supports both path-based and query param (?q=) URL formats
  */
 
-const ASSET_URL = ''
 const PREFIX = '/'
 const Config = {
     jsdelivr: 0
@@ -22,18 +22,12 @@ const exp6 = /^(?:https?:\/\/)?github\.com\/.+?\/.+?\/tags.*$/i
 
 function makeRes(body, status = 200, headers = {}) {
     headers['access-control-allow-origin'] = '*'
-    return {
-        statusCode: status,
-        headers: headers,
-        body: body
-    }
+    return { statusCode: status, headers, body }
 }
 
 function checkUrl(u) {
     for (let i of [exp1, exp2, exp3, exp4, exp5, exp6]) {
-        if (u.search(i) === 0) {
-            return true
-        }
+        if (u.search(i) === 0) return true
     }
     return false
 }
@@ -54,14 +48,9 @@ async function httpHandler(pathname, method, reqHeaders, body) {
     let urlStr = pathname
     let flag = !Boolean(whiteList.length)
     for (let i of whiteList) {
-        if (urlStr.includes(i)) {
-            flag = true
-            break
-        }
+        if (urlStr.includes(i)) { flag = true; break }
     }
-    if (!flag) {
-        return makeRes("blocked", 403)
-    }
+    if (!flag) return makeRes('blocked', 403)
     if (urlStr.search(/^https?:\/\//) !== 0) {
         urlStr = 'https://' + urlStr
     }
@@ -70,9 +59,8 @@ async function httpHandler(pathname, method, reqHeaders, body) {
         const fetchHeaders = { ...reqHeaders }
         delete fetchHeaders['host']
         delete fetchHeaders['connection']
-
         const fetchOpts = {
-            method: method,
+            method,
             headers: fetchHeaders,
             redirect: 'manual'
         }
@@ -91,7 +79,7 @@ async function httpHandler(pathname, method, reqHeaders, body) {
             if (checkUrl(location)) {
                 resHeaders['location'] = PREFIX + location
             } else {
-                const redirectRes = await fetch(location, { method: method, redirect: 'follow' })
+                const redirectRes = await fetch(location, { method, redirect: 'follow' })
                 const redirectHeaders = {}
                 for (const [k, v] of redirectRes.headers.entries()) {
                     redirectHeaders[k] = v
@@ -101,8 +89,6 @@ async function httpHandler(pathname, method, reqHeaders, body) {
                 delete redirectHeaders['content-security-policy']
                 delete redirectHeaders['content-security-policy-report-only']
                 delete redirectHeaders['clear-site-data']
-                
-                // Stream the redirect response body
                 const redirectBuffer = await redirectRes.arrayBuffer()
                 return {
                     statusCode: redirectRes.status,
@@ -118,7 +104,6 @@ async function httpHandler(pathname, method, reqHeaders, body) {
         delete resHeaders['content-security-policy-report-only']
         delete resHeaders['clear-site-data']
 
-        // Use arrayBuffer for binary file support
         const resBuffer = await res.arrayBuffer()
         return {
             statusCode: res.status,
@@ -126,7 +111,7 @@ async function httpHandler(pathname, method, reqHeaders, body) {
             body: Buffer.from(resBuffer)
         }
     } catch (err) {
-        return makeRes('proxy error:\n' + err.stack, 502)
+        return makeRes('proxy error:\\n' + err.stack, 502)
     }
 }
 
@@ -135,27 +120,15 @@ module.exports = async (req, res) => {
     const urlStr = req.url
     let path = ''
 
-    // Check query param q= for redirect
+    // Mode 1: query param ?q=URL
     const qParam = req.query?.q
     if (qParam) {
-        const host = req.headers.host || ''
-        const redirectUrl = 'https://' + host + PREFIX + qParam
-        res.writeHead(301, { Location: redirectUrl })
-        res.end()
-        return
-    }
-
-    // Extract path after PREFIX
-    path = urlStr.slice(PREFIX.length)
-    
-    // Fix Vercel URL normalization: https:/ becomes https://
-    // Vercel strips the double slash in URL paths
-    path = path.replace(/^(https?):\/([^/])/, '$1://$2')
-    
-    // Also handle case where protocol was stripped entirely
-    if (!path.match(/^https?:\/\//)) {
-        // Check if it starts with github.com or raw.githubusercontent.com etc
-        path = path.replace(/^(github\.com|raw\.githubusercontent\.com|gist\.githubusercontent\.com|gist\.github\.com)/i, 'https://$1')
+        path = qParam
+    } else {
+        // Mode 2: path-based URL
+        path = urlStr.slice(PREFIX.length)
+        // Fix Vercel URL normalization: https:/ -> https://
+        path = path.replace(/^(https?):\/([^/])/, '$1://$2')
     }
 
     if (path.search(exp1) === 0 || path.search(exp5) === 0 || path.search(exp6) === 0 || path.search(exp3) === 0) {
@@ -201,7 +174,7 @@ function getIndexHtml() {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>GitHub 文件加速</title>
+<title>GitHub \u6587\u4ef6\u52a0\u901f</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;background:#f6f8fa;color:#24292e;padding:20px}
@@ -223,37 +196,38 @@ footer{text-align:center;margin-top:40px;color:#586069;font-size:12px}
 </head>
 <body>
 <div class="container">
-<h1>GitHub 文件加速</h1>
-<p class="desc">GitHub Release、Archive 以及项目文件的加速下载</p>
+<h1>GitHub \u6587\u4ef6\u52a0\u901f</h1>
+<p class="desc">GitHub Release\u3001Archive \u4ee5\u53ca\u9879\u76ee\u6587\u4ef6\u7684\u52a0\u901f\u4e0b\u8f7d</p>
 <div class="input-group">
-<input id="url" placeholder="粘贴 GitHub 文件链接" autofocus>
-<button onclick="accelerate()">加速</button>
+<input id="url" placeholder="\u7c98\u8d34 GitHub \u6587\u4ef6\u94fe\u63a5" autofocus>
+<button onclick="accelerate()">\u52a0\u901f</button>
 </div>
 <div id="result" class="result"></div>
 <div class="usage">
-<h3>支持的链接格式</h3>
+<h3>\u652f\u6301\u7684\u94fe\u63a5\u683c\u5f0f</h3>
 <ul>
-<li>Release 文件：https://github.com/user/repo/releases/download/v1.0/file.zip</li>
-<li>Archive：https://github.com/user/repo/archive/master.zip</li>
-<li>分支文件：https://github.com/user/repo/blob/master/file</li>
-<li>Raw 文件：https://raw.githubusercontent.com/user/repo/master/file</li>
-<li>Gist：https://gist.githubusercontent.com/user/id/raw/file</li>
+<li>Release \u6587\u4ef6\uff1ahttps://github.com/user/repo/releases/download/v1.0/file.zip</li>
+<li>Archive\uff1ahttps://github.com/user/repo/archive/master.zip</li>
+<li>\u5206\u652f\u6587\u4ef6\uff1ahttps://github.com/user/repo/blob/master/file</li>
+<li>Raw \u6587\u4ef6\uff1ahttps://raw.githubusercontent.com/user/repo/master/file</li>
 </ul>
-<h3>使用方式</h3>
-<p>在原链接前加上本站地址即可，例如：</p>
-<p>https://github.com/user/repo/releases/download/v1.0/file.zip → https://你的域名/https://github.com/user/repo/releases/download/v1.0/file.zip</p>
+<h3>\u4f7f\u7528\u65b9\u5f0f</h3>
+<p>\u65b9\u5f0f\u4e00\uff08\u63a8\u8350\uff09\uff1a\u4f7f\u7528 ?q= \u53c2\u6570</p>
+<p>https://gh.vipwzt.com/?q=https://github.com/user/repo/releases/download/v1.0/file.zip</p>
+<p>\u65b9\u5f0f\u4e8c\uff1a\u76f4\u63a5\u62fc\u63a5</p>
+<p>https://gh.vipwzt.com/https://github.com/user/repo/releases/download/v1.0/file.zip</p>
 </div>
 </div>
 <footer>gh-proxy | Powered by Vercel</footer>
 <script>
 function accelerate(){
-  const url=document.getElementById('url').value.trim()
-  if(!url){alert('请输入链接');return}
-  const host=location.origin+'/'
-  const result=host+url
-  const el=document.getElementById('result')
-  el.style.display='block'
-  el.innerHTML='加速链接：<a href="'+result+'" target="_blank">'+result+'</a>'
+  const url=document.getElementById("url").value.trim()
+  if(!url){alert("\u8bf7\u8f93\u5165\u94fe\u63a5");return}
+  const host=location.origin+"/?q="
+  const result=host+encodeURIComponent(url)
+  const el=document.getElementById("result")
+  el.style.display="block"
+  el.innerHTML="\u52a0\u901f\u94fe\u63a5\uff1a<a href=\""+result+"\" target=\"_blank\">"+result+"</a>"
 }
 </script>
 </body>
