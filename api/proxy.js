@@ -5,7 +5,7 @@
  * Adapted for Vercel Serverless Functions
  */
 
-const ASSET_URL = ''  // Empty: serve local public/index.html
+const ASSET_URL = ''
 const PREFIX = '/'
 const Config = {
     jsdelivr: 0
@@ -39,7 +39,6 @@ function checkUrl(u) {
 }
 
 async function httpHandler(pathname, method, reqHeaders, body) {
-    // preflight
     if (method === 'OPTIONS') {
         return {
             statusCode: 204,
@@ -92,7 +91,6 @@ async function httpHandler(pathname, method, reqHeaders, body) {
             if (checkUrl(location)) {
                 resHeaders['location'] = PREFIX + location
             } else {
-                // Follow redirect
                 const redirectRes = await fetch(location, { method: method, redirect: 'follow' })
                 const redirectHeaders = {}
                 for (const [k, v] of redirectRes.headers.entries()) {
@@ -103,11 +101,13 @@ async function httpHandler(pathname, method, reqHeaders, body) {
                 delete redirectHeaders['content-security-policy']
                 delete redirectHeaders['content-security-policy-report-only']
                 delete redirectHeaders['clear-site-data']
-                const redirectBody = await redirectRes.text()
+                
+                // Stream the redirect response body
+                const redirectBuffer = await redirectRes.arrayBuffer()
                 return {
                     statusCode: redirectRes.status,
                     headers: redirectHeaders,
-                    body: redirectBody
+                    body: Buffer.from(redirectBuffer)
                 }
             }
         }
@@ -118,11 +118,12 @@ async function httpHandler(pathname, method, reqHeaders, body) {
         delete resHeaders['content-security-policy-report-only']
         delete resHeaders['clear-site-data']
 
-        const resBody = await res.text()
+        // Use arrayBuffer for binary file support
+        const resBuffer = await res.arrayBuffer()
         return {
             statusCode: res.status,
             headers: resHeaders,
-            body: resBody
+            body: Buffer.from(resBuffer)
         }
     } catch (err) {
         return makeRes('proxy error:\n' + err.stack, 502)
@@ -144,12 +145,18 @@ module.exports = async (req, res) => {
         return
     }
 
-    // Extract path after PREFIX - fix: properly handle the URL protocol
+    // Extract path after PREFIX
     path = urlStr.slice(PREFIX.length)
-    // Remove leading slashes and normalize multiple slashes after protocol
-    path = path.replace(/^\/+/, '')
-    // Ensure protocol has exactly two slashes
-    path = path.replace(/^(https?):\/+(.*)/, '$1://$2')
+    
+    // Fix Vercel URL normalization: https:/ becomes https://
+    // Vercel strips the double slash in URL paths
+    path = path.replace(/^(https?):\/([^/])/, '$1://$2')
+    
+    // Also handle case where protocol was stripped entirely
+    if (!path.match(/^https?:\/\//)) {
+        // Check if it starts with github.com or raw.githubusercontent.com etc
+        path = path.replace(/^(github\.com|raw\.githubusercontent\.com|gist\.githubusercontent\.com|gist\.github\.com)/i, 'https://$1')
+    }
 
     if (path.search(exp1) === 0 || path.search(exp5) === 0 || path.search(exp6) === 0 || path.search(exp3) === 0) {
         const result = await httpHandler(path, method, req.headers, req.body)
@@ -182,7 +189,6 @@ module.exports = async (req, res) => {
             return
         }
     } else {
-        // Serve the static index page
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
         res.end(getIndexHtml())
         return
