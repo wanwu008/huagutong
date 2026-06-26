@@ -144,8 +144,12 @@ module.exports = async (req, res) => {
         return
     }
 
-    // Extract path after PREFIX
-    path = urlStr.slice(PREFIX.length).replace(/^https?:\/+/, 'https://')
+    // Extract path after PREFIX - fix: properly handle the URL protocol
+    path = urlStr.slice(PREFIX.length)
+    // Remove leading slashes and normalize multiple slashes after protocol
+    path = path.replace(/^\/+/, '')
+    // Ensure protocol has exactly two slashes
+    path = path.replace(/^(https?):\/+(.*)/, '$1://$2')
 
     if (path.search(exp1) === 0 || path.search(exp5) === 0 || path.search(exp6) === 0 || path.search(exp3) === 0) {
         const result = await httpHandler(path, method, req.headers, req.body)
