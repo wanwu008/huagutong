@@ -1,9 +1,11 @@
 {
   "version": 2,
-  "routes": [
+  "cleanUrls": false,
+  "trailingSlash": false,
+  "rewrites": [
     {
-      "src": "/(.*)",
-      "dest": "/api/proxy.js"
+      "source": "/(.*)",
+      "destination": "/api/proxy.js"
     }
   ]
 }
